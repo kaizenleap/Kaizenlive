@@ -2,8 +2,29 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>Kaizen LiveOps PRO · Agencia #1</title>
+
+<!-- ── PWA META TAGS ── -->
+<meta name="application-name" content="Kaizen PRO"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Kaizen PRO"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="theme-color" content="#060709"/>
+<meta name="description" content="Kaizen LiveOps PRO - Dashboard de agencia"/>
+
+<!-- ── PWA MANIFEST ── -->
+<link rel="manifest" href="manifest.json"/>
+
+<!-- ── APPLE TOUCH ICONS ── -->
+<link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png"/>
+<link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png"/>
+<link rel="apple-touch-icon" sizes="120x120" href="icons/icon-120.png"/>
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png"/>
+
+<!-- ── iOS SPLASH SCREEN (iPhone 14 Pro) ── -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
@@ -4661,5 +4682,16 @@ boot();
 /* Firebase sanity helper preserved by V7 patch. Use kaizenSyncStatus() in console. */
 </script>
 
+
+<!-- ── SERVICE WORKER REGISTRATION ── -->
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('✓ Service Worker registrado:', reg.scope))
+      .catch(err => console.warn('SW error:', err));
+  });
+}
+</script>
 </body>
 </html>
