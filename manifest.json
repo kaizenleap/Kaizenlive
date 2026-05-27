@@ -1,0 +1,66 @@
+{
+  "name": "Kaizen LiveOps PRO",
+  "short_name": "Kaizen PRO",
+  "description": "Dashboard operativo para tu agencia de contenido",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#060709",
+  "theme_color": "#060709",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-152.png",
+      "sizes": "152x152",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-120.png",
+      "sizes": "120x120",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "./index.html#dashboard",
+      "description": "Ver dashboard principal"
+    },
+    {
+      "name": "Clientes",
+      "short_name": "Clientes",
+      "url": "./index.html#clientes",
+      "description": "Ver clientes"
+    },
+    {
+      "name": "Tareas",
+      "short_name": "Tareas",
+      "url": "./index.html#tareas",
+      "description": "Ver tareas"
+    }
+  ]
+}
