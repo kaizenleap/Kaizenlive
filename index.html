@@ -1038,10 +1038,15 @@ nav::-webkit-scrollbar{display:none}
   padding:10px 0;
   overflow:hidden;
   position:relative;
+  font-size:0 !important;  /* hide direct text nodes */
+  letter-spacing:0 !important;
 }
 /* Hide all children except .nav-icon svg */
 #sidebar.collapsed .nav-item > *:not(.nav-icon){
   display:none !important;
+}
+#sidebar.collapsed .nav-icon{
+  font-size:initial;
 }
 #sidebar.collapsed .logo-wrap{
   padding:14px 8px;
@@ -2101,6 +2106,7 @@ body::before {
   <div class="page" id="page-produccion"><div id="produccion-content"></div></div>
   <div class="page" id="page-equipo"><div id="equipo-content"></div></div>
   <div class="page" id="page-reportes"><div id="reportes-content"></div></div>
+  <div class="page" id="page-paquetes"><div id="paquetes-content"></div></div>
   <div class="page" id="page-caso"><div id="caso-content"></div></div>
   <div class="page" id="page-propuesta"><div id="propuesta-content"></div></div>
   <div class="page" id="page-avance"><div id="avance-content"></div></div>
@@ -2321,7 +2327,7 @@ function go(page){
 }
 
 function renderPage(p){
-  const fn = {dashboard:renderDashboard,clientes:renderClientes,pipeline:renderPipeline,tareas:renderTareas,finanzas:renderFinanzas,simulador:renderSimulador,produccion:renderProduccion,equipo:renderEquipo,reportes:renderReportes,caso:renderCaso,propuesta:renderPropuesta,avance:renderAvance};
+  const fn = {dashboard:renderDashboard,clientes:renderClientes,pipeline:renderPipeline,tareas:renderTareas,finanzas:renderFinanzas,simulador:renderSimulador,produccion:renderProduccion,equipo:renderEquipo,reportes:renderReportes,caso:renderCaso,propuesta:renderPropuesta,avance:renderAvance,paquetes:typeof renderPaquetes!=='undefined'?renderPaquetes:renderDashboard};
   fn[p]?.();
 }
 
@@ -3293,7 +3299,7 @@ boot();
     updateBadges();
   }
   window.renderPage = function(p){
-    ({dashboard:renderDashboard,guia:renderGuia,alertas:renderAlertas,clientes:renderClientes,pipeline:renderPipeline,onboarding:renderOnboarding,tareas:renderTareas,finanzas:renderFinanzas,simulador:renderSimulador,produccion:renderProduccion,calendario:renderCalendario,equipo:renderEquipo,reportes:renderReportes,caso:renderCaso,propuesta:renderPropuesta,avance:renderAvance}[p]||renderDashboard)();
+    ({dashboard:renderDashboard,guia:renderGuia,alertas:renderAlertas,clientes:renderClientes,pipeline:renderPipeline,onboarding:renderOnboarding,tareas:renderTareas,paquetes:typeof renderPaquetes!=='undefined'?renderPaquetes:renderDashboard,finanzas:renderFinanzas,simulador:renderSimulador,produccion:renderProduccion,calendario:renderCalendario,equipo:renderEquipo,reportes:renderReportes,caso:renderCaso,propuesta:renderPropuesta,avance:renderAvance}[p]||renderDashboard)();
   }
   window.updateBadges = function(){
     const set=(id,v)=>{const el=$('#nb-'+id);if(el)el.textContent=v};
@@ -5454,8 +5460,12 @@ boot();
     if(firebaseState && localState){
       const fu = Number(firebaseState.__updatedAt || 0);
       const lu = Number(localState.__updatedAt || 0);
-      if(fu || lu) return lu >= fu ? localState : firebaseState;
-      return scoreState(localState) > scoreState(firebaseState) ? localState : firebaseState;
+      // Firebase siempre gana si tiene timestamp válido y es >= local
+      // Margen de 5s para evitar que race conditions locales sobreescriban Firebase
+      if(fu && lu) return fu >= lu - 5000 ? firebaseState : localState;
+      if(fu) return firebaseState;
+      if(lu) return localState;
+      return scoreState(firebaseState) >= scoreState(localState) ? firebaseState : localState;
     }
     return firebaseState || localState || null;
   }
@@ -5496,11 +5506,10 @@ boot();
     const currentState = getRealState();
     const bootStartedAt = Number(window.__kaizenBootStartedAt || 0);
 
-    // Si el arranque viejo escribió datos mientras Firebase todavía cargaba,
-    // no dejamos que ese estado temporal gane sobre Firebase.
-    if(firebaseState && localState && bootStartedAt && Number(localState.__updatedAt || 0) >= bootStartedAt){
-      localState = null;
-    }
+    // Si Firebase tiene datos válidos, no necesitamos el localState para la comparación.
+    // La función chooseState ya prioriza Firebase. Solo anulamos localState si Firebase
+    // tiene un timestamp más reciente que el localState (ya lo maneja chooseState).
+    // No anulamos localState basado en bootStartedAt: eso causaba pérdida de datos.
 
     let chosen = chooseState(firebaseState, localState);
 
