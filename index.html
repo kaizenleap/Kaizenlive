@@ -946,6 +946,20 @@ nav::-webkit-scrollbar{display:none}
   margin-top:14px;line-height:1.5;
 }
 
+/* ── SIDEBAR TOGGLE ── */
+/* Desktop: mostrar botón de colapso siempre */
+#sidebarCloseBtn{display:flex;align-items:center}
+#sidebar.collapsed{transform:translateX(-252px)}
+#main.sidebar-collapsed{margin-left:0}
+/* Mobile: mostrar overlay */
+@media(max-width:768px){
+  #sidebarOverlay.show{display:block!important}
+}
+/* Desktop: el botón cierra/abre el sidebar */
+@media(min-width:769px){
+  #sidebarOverlay{display:none!important}
+}
+
 /* ── DESKTOP ONLY ELEMENTS ── */
 .topbar-desktop-only{display:inline-flex}
 @media(max-width:480px){
@@ -1178,6 +1192,7 @@ nav::-webkit-scrollbar{display:none}
 <body>
 
 <!-- SIDEBAR -->
+<div id="sidebarOverlay" onclick="closeSidebar()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99;backdrop-filter:blur(2px)"></div>
 <aside id="sidebar">
   <div class="logo-wrap">
     <div class="logo-mark">
@@ -1192,6 +1207,7 @@ nav::-webkit-scrollbar{display:none}
         <div class="logo-sub">LiveOps OS</div>
       </div>
       <span class="badge-pro">PRO</span>
+      <button id="sidebarCloseBtn" onclick="closeSidebar()" title="Cerrar menú" style="margin-left:auto;background:none;border:none;color:var(--sub);cursor:pointer;font-size:20px;line-height:1;padding:4px;border-radius:6px;transition:color .15s;flex-shrink:0">✕</button>
     </div>
   </div>
 
@@ -1433,7 +1449,7 @@ function go(page){
   $('#topbarTitle').textContent = titles[page]||page;
   // Cerrar sidebar en móvil al navegar
   if(window.innerWidth <= 768){
-    document.getElementById('sidebar')?.classList.remove('open');
+    closeSidebar();
   }
   renderPage(page);
   updateBadges();
@@ -4730,6 +4746,60 @@ boot();
 /* Firebase sanity helper preserved by V7 patch. Use kaizenSyncStatus() in console. */
 </script>
 
+
+<script>
+/* ── SIDEBAR TOGGLE FUNCTIONS ── */
+function closeSidebar(){
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  const main = document.getElementById('main');
+  if(window.innerWidth <= 768){
+    sidebar.classList.remove('open');
+    overlay.classList.remove('show');
+  } else {
+    sidebar.classList.add('collapsed');
+    main.classList.add('sidebar-collapsed');
+    // Show re-open button in topbar
+    let reopenBtn = document.getElementById('sidebarOpenBtn');
+    if(!reopenBtn){
+      reopenBtn = document.createElement('button');
+      reopenBtn.id = 'sidebarOpenBtn';
+      reopenBtn.innerHTML = '☰';
+      reopenBtn.title = 'Abrir menú';
+      reopenBtn.style.cssText = 'background:none;border:1px solid var(--border2);color:var(--text);cursor:pointer;font-size:16px;padding:6px 10px;border-radius:8px;transition:all .15s';
+      reopenBtn.onclick = openSidebar;
+      const topbarActions = document.querySelector('.topbar-actions');
+      if(topbarActions) topbarActions.prepend(reopenBtn);
+    }
+    reopenBtn.style.display = 'inline-flex';
+  }
+}
+function openSidebar(){
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  const main = document.getElementById('main');
+  if(window.innerWidth <= 768){
+    sidebar.classList.add('open');
+    overlay.classList.add('show');
+  } else {
+    sidebar.classList.remove('collapsed');
+    main.classList.remove('sidebar-collapsed');
+    const reopenBtn = document.getElementById('sidebarOpenBtn');
+    if(reopenBtn) reopenBtn.style.display = 'none';
+  }
+}
+// Actualizar menuBtn para mostrar overlay en móvil
+document.getElementById('menuBtn').onclick = function(){
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if(sidebar.classList.contains('open')){
+    closeSidebar();
+  } else {
+    sidebar.classList.add('open');
+    if(overlay) overlay.classList.add('show');
+  }
+};
+</script>
 
 <!-- ── SERVICE WORKER REGISTRATION ── -->
 <script>
