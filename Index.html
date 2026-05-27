@@ -19,7 +19,7 @@
     projectId: "kaizenlive",
     storageBucket: "kaizenlive.firebasestorage.app",
     messagingSenderId: "659479963267",
-    appId: "1:659479963267:web:1516d4ceb6a39e68335db6"
+    appId: "1:659479963267:web:42e3bc0885ebfce7335db6"
   };
 
   const app = initializeApp(firebaseConfig);
@@ -56,7 +56,6 @@
 
   // Cargar datos al iniciar y luego arrancar el sistema
   window.addEventListener('DOMContentLoaded', async () => {
-    // Mostrar indicador de carga
     const indicator = document.getElementById('fb-loading');
     if(indicator) indicator.style.display = 'flex';
 
@@ -70,14 +69,20 @@
 
     if(indicator) indicator.style.display = 'none';
 
-    // Activar guardado automático en Firebase cada vez que se llame persist
-    const _origPersist = window.persist;
-    window.persist = function() {
-      // Guardar local siempre (rápido)
-      localStorage.setItem('kaizen-pro-v1', JSON.stringify(window.state));
-      // Guardar en Firebase (async, en segundo plano)
-      window.firebaseSave(window.state);
-    };
+    // Hook persist para guardar en Firebase cada vez que se llame
+    function hookPersist() {
+      const _orig = window.persist;
+      if(_orig && !_orig._hooked) {
+        window.persist = function() {
+          _orig();
+          window.firebaseSave(window.state);
+        };
+        window.persist._hooked = true;
+      }
+    }
+    hookPersist();
+    setTimeout(hookPersist, 500);
+    setTimeout(hookPersist, 1500);
   });
 </script>
 <style>
