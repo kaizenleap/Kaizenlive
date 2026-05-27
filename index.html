@@ -1650,6 +1650,58 @@ body::before {
 </script>
 
 
+<script id="kaizen-persistence-guard-v9">
+(function(){
+  if(window.__kaizenPersistenceGuardV9) return;
+  window.__kaizenPersistenceGuardV9 = true;
+
+  var STATE_KEYS = [
+    'kaizen-pro-v1',
+    'kaizen-pro-v2-completo',
+    'kaizen-liveops-pro-v4-empresarial',
+    'kaizen-liveops-pro-v5',
+    'kaizen-liveops-pro-v5-control-total',
+    'kaizen-liveops-pro-v6',
+    'kaizen-liveops-pro-v6-control-total',
+    'kaizen-liveops-pro-v7',
+    'kaizen-liveops-pro-v8',
+    'kaizen-liveops-pro-v9-single-source'
+  ];
+
+  window.__kaizenStateKeysV9 = STATE_KEYS.slice();
+  window.__kaizenBlockedStateWritesV9 = [];
+
+  var nativeSetItem = Storage.prototype.setItem;
+  window.__kaizenNativeSetItemV9 = nativeSetItem;
+  window.__kaizenPersistenceLockedV9 = true;
+
+  function isStateKey(key){
+    return STATE_KEYS.indexOf(String(key)) !== -1;
+  }
+
+  Storage.prototype.setItem = function(key, value){
+    if(window.__kaizenPersistenceLockedV9 && isStateKey(key)){
+      window.__kaizenBlockedStateWritesV9.push({
+        key: String(key),
+        at: Date.now(),
+        bytes: String(value || '').length
+      });
+      return undefined;
+    }
+    return nativeSetItem.apply(this, arguments);
+  };
+
+  window.__kaizenUnlockPersistenceV9 = function(){
+    window.__kaizenPersistenceLockedV9 = false;
+    if(Storage.prototype.setItem !== nativeSetItem){
+      Storage.prototype.setItem = nativeSetItem;
+    }
+  };
+})();
+</script>
+
+
+
 <!-- ══════════════════════════════════════════════════
      KAIZEN LEAP · CINEMATIC SPLASH SCREEN
 ══════════════════════════════════════════════════ -->
@@ -5872,6 +5924,575 @@ function closeMobileDrawer(){
   document.getElementById('drawerOverlay').classList.remove('show');
 }
 </script>
+
+
+<script id="kaizen-persistence-v9-single-source">
+(function(){
+  if(window.__kaizenPersistenceV9Loaded) return;
+  window.__kaizenPersistenceV9Loaded = true;
+
+  var VERSION = 'v9-single-source-2026-05-27';
+  var STATE_KEYS = window.__kaizenStateKeysV9 || [
+    'kaizen-pro-v1',
+    'kaizen-pro-v2-completo',
+    'kaizen-liveops-pro-v4-empresarial',
+    'kaizen-liveops-pro-v5',
+    'kaizen-liveops-pro-v5-control-total',
+    'kaizen-liveops-pro-v6',
+    'kaizen-liveops-pro-v6-control-total',
+    'kaizen-liveops-pro-v7',
+    'kaizen-liveops-pro-v8',
+    'kaizen-liveops-pro-v9-single-source'
+  ];
+
+  var FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyCdFXfoCBEZCT2tyRUHRJZT5tYbq8CHWWQ',
+    authDomain: 'kaizenlive.firebaseapp.com',
+    projectId: 'kaizenlive',
+    storageBucket: 'kaizenlive.firebasestorage.app',
+    messagingSenderId: '659479963267',
+    appId: '1:659479963267:web:42e3bc0885ebfce7335db6'
+  };
+
+  var FIRESTORE_COLLECTION = 'kaizen';
+  var FIRESTORE_DOC = 'state';
+  var restoreDone = false;
+  var firebaseChecked = false;
+  var userChangedAfterRestore = false;
+  var savingFirebase = false;
+  var saveTimer = null;
+  var watchTimer = null;
+  var lastSnapshot = '';
+
+  function safeParse(value){
+    try { return JSON.parse(value); } catch(e) { return null; }
+  }
+
+  function safeClone(value){
+    try { return JSON.parse(JSON.stringify(value)); } catch(e) { return value; }
+  }
+
+  function isObject(value){
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function getRealState(){
+    try {
+      if(typeof state !== 'undefined' && state) return state;
+    } catch(e) {}
+    return window.state || null;
+  }
+
+  function setRealState(next){
+    if(!isObject(next)) return;
+    try { state = next; } catch(e) {}
+    window.state = next;
+  }
+
+  function ensureArray(obj, key){
+    if(!Array.isArray(obj[key])) obj[key] = [];
+  }
+
+  function normalizeState(input){
+    if(!isObject(input)) return null;
+    var st = input;
+    ensureArray(st, 'clients');
+    ensureArray(st, 'prospects');
+    ensureArray(st, 'tasks');
+    ensureArray(st, 'members');
+    ensureArray(st, 'events');
+    ensureArray(st, 'reports');
+    if(!isObject(st.checks)) st.checks = {};
+    if(!isObject(st.settings)) st.settings = {};
+    if(!isObject(st.packages)) st.packages = {};
+    if(!isObject(st.catalog)) st.catalog = {};
+    if(!isObject(st.personal)) st.personal = {};
+    if(!isObject(st.goals)) st.goals = {};
+    if(!isObject(st.caseStudy)) st.caseStudy = {};
+    return st;
+  }
+
+  function itemKey(item){
+    if(!item || typeof item !== 'object') return '';
+    return String(item.id || item.name || item.title || '');
+  }
+
+  function mergeArrayByIdentity(target, fallback){
+    if(!Array.isArray(target)) target = [];
+    if(!Array.isArray(fallback)) return target;
+    var seen = {};
+    target.forEach(function(item){ var k = itemKey(item); if(k) seen[k] = true; });
+    fallback.forEach(function(item){
+      var k = itemKey(item);
+      if(k && !seen[k]){
+        target.push(safeClone(item));
+        seen[k] = true;
+      }
+    });
+    return target;
+  }
+
+  function fillEmptyFields(target, fallback){
+    if(!isObject(target) || !isObject(fallback)) return target;
+    Object.keys(fallback).forEach(function(key){
+      if(target[key] === undefined || target[key] === null || target[key] === ''){
+        target[key] = safeClone(fallback[key]);
+      } else if(isObject(target[key]) && isObject(fallback[key])){
+        fillEmptyFields(target[key], fallback[key]);
+      }
+    });
+    return target;
+  }
+
+  function mergeRuntimeDefaults(chosen, runtime){
+    chosen = normalizeState(chosen) || {};
+    runtime = normalizeState(runtime) || {};
+
+    chosen.packages = Object.assign({}, runtime.packages || {}, chosen.packages || {});
+    chosen.catalog = Object.assign({}, runtime.catalog || {}, chosen.catalog || {});
+    chosen.settings = Object.assign({}, runtime.settings || {}, chosen.settings || {});
+    chosen.personal = Object.assign({}, runtime.personal || {}, chosen.personal || {});
+    chosen.goals = Object.assign({}, runtime.goals || {}, chosen.goals || {});
+    chosen.caseStudy = Object.assign({}, runtime.caseStudy || {}, chosen.caseStudy || {});
+
+    chosen.members = mergeArrayByIdentity(chosen.members, runtime.members);
+    chosen.events = mergeArrayByIdentity(chosen.events, runtime.events);
+
+    // Keep user-created tasks/prospects/clients intact. Only add default clients if the saved state has none.
+    if((chosen.clients || []).length === 0 && (runtime.clients || []).length){
+      chosen.clients = safeClone(runtime.clients);
+    }
+
+    // Protect edited Super/Superpizza data while still filling blank fields from bundled defaults.
+    var runtimeSupers = (runtime.clients || []).filter(function(c){
+      return c && String(c.name || '').toLowerCase().indexOf('super') !== -1;
+    });
+    runtimeSupers.forEach(function(def){
+      var existing = (chosen.clients || []).find(function(c){
+        return c && (c.id === def.id || String(c.name || '').toLowerCase().indexOf('super') !== -1);
+      });
+      if(existing) fillEmptyFields(existing, def);
+    });
+
+    return normalizeState(chosen);
+  }
+
+  function contentScore(st){
+    if(!isObject(st)) return -1;
+    var score = 0;
+    score += Array.isArray(st.clients) ? st.clients.length * 100000 : 0;
+    score += Array.isArray(st.prospects) ? st.prospects.length * 25000 : 0;
+    score += Array.isArray(st.tasks) ? st.tasks.length * 12000 : 0;
+    score += Array.isArray(st.events) ? st.events.length * 4000 : 0;
+    score += Array.isArray(st.reports) ? st.reports.length * 50000 : 0;
+    try { score += JSON.stringify(st).length; } catch(e) {}
+    return score;
+  }
+
+  function makeCandidate(source, data){
+    var cloned = normalizeState(safeClone(data));
+    if(!cloned) return null;
+
+    var updatedAt = Number(cloned.__updatedAt || cloned.updatedAt || 0);
+    if(updatedAt && !cloned.__updatedAt) cloned.__updatedAt = updatedAt;
+
+    var bootStartedAt = Number(window.__kaizenBootStartedAt || 0);
+    var startupCurrentPenalty = 0;
+    if(source === 'current' && updatedAt && bootStartedAt && updatedAt >= bootStartedAt){
+      startupCurrentPenalty = -9000000000000000000;
+    }
+
+    return {
+      source: source,
+      state: cloned,
+      updatedAt: updatedAt,
+      score: (updatedAt ? updatedAt * 1000 : 0) + contentScore(cloned) + startupCurrentPenalty
+    };
+  }
+
+  function chooseBest(candidates){
+    var valid = candidates.filter(Boolean);
+    if(!valid.length) return null;
+
+    valid.sort(function(a, b){
+      if(a.updatedAt && b.updatedAt && a.updatedAt !== b.updatedAt) return b.updatedAt - a.updatedAt;
+      return b.score - a.score;
+    });
+
+    var nonCurrent = valid.filter(function(c){ return c.source !== 'current'; });
+    if(nonCurrent.length){
+      nonCurrent.sort(function(a, b){
+        if(a.updatedAt && b.updatedAt && a.updatedAt !== b.updatedAt) return b.updatedAt - a.updatedAt;
+        return b.score - a.score;
+      });
+      return nonCurrent[0];
+    }
+
+    return valid[0];
+  }
+
+  function readLocalCandidates(){
+    var list = [];
+    STATE_KEYS.forEach(function(key){
+      var parsed = safeParse(localStorage.getItem(key) || 'null');
+      var c = makeCandidate('local:' + key, parsed);
+      if(c) list.push(c);
+    });
+    return list;
+  }
+
+  function nativeSetItem(key, value){
+    var nativeSet = window.__kaizenNativeSetItemV9;
+    if(nativeSet) return nativeSet.call(localStorage, key, value);
+    return localStorage.setItem(key, value);
+  }
+
+  function writeLocal(st){
+    if(!isObject(st)) return;
+    var json = JSON.stringify(st);
+    STATE_KEYS.forEach(function(key){
+      try { nativeSetItem(key, json); } catch(e) {}
+    });
+    lastSnapshot = json;
+  }
+
+  function getFirebaseDoc(){
+    try {
+      if(!window.firebase || !window.firebase.firestore) return null;
+      if(!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+      return firebase.firestore().collection(FIRESTORE_COLLECTION).doc(FIRESTORE_DOC);
+    } catch(e) {
+      console.warn('Firebase no disponible:', e);
+      return null;
+    }
+  }
+
+  async function readFirebaseState(){
+    var doc = getFirebaseDoc();
+    if(!doc) return null;
+    try {
+      var snap = await doc.get();
+      if(!snap.exists) return null;
+      var raw = snap.data() || {};
+      var parsed = typeof raw.data === 'string' ? safeParse(raw.data) : raw.data;
+      if(!parsed && raw.clients) parsed = raw;
+      if(parsed && raw.updatedAt && !parsed.__updatedAt) parsed.__updatedAt = Number(raw.updatedAt);
+      return parsed || null;
+    } catch(e) {
+      console.warn('Firebase load error:', e);
+      return null;
+    }
+  }
+
+  function withTimeout(promise, ms){
+    return new Promise(function(resolve){
+      var done = false;
+      var timer = setTimeout(function(){
+        if(done) return;
+        done = true;
+        resolve({ timedOut: true, value: null });
+      }, ms);
+
+      Promise.resolve(promise).then(function(value){
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ timedOut: false, value: value });
+      }).catch(function(){
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ timedOut: false, value: null });
+      });
+    });
+  }
+
+  async function writeFirebase(st, reason){
+    if(!isObject(st) || savingFirebase) return;
+    if(!firebaseChecked && reason !== 'manual' && reason !== 'user') return;
+
+    var doc = getFirebaseDoc();
+    if(!doc) return;
+
+    savingFirebase = true;
+    try {
+      var payload = safeClone(st);
+      await doc.set({
+        data: JSON.stringify(payload),
+        updatedAt: Number(payload.__updatedAt || Date.now()),
+        syncVersion: VERSION
+      }, { merge: true });
+      console.log('Kaizen V9: Firebase guardado', reason || 'sync');
+    } catch(e) {
+      console.warn('Firebase save error:', e);
+    } finally {
+      savingFirebase = false;
+    }
+  }
+
+  function scheduleFirebase(st, reason){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){
+      writeFirebase(st, reason || 'auto');
+    }, 350);
+  }
+
+  function saveNow(reason, candidateData){
+    if(!restoreDone && reason !== 'restore') return null;
+
+    var real = normalizeState(getRealState());
+    var incoming = normalizeState(candidateData);
+    var chosen = real;
+
+    if(incoming){
+      var incomingTime = Number(incoming.__updatedAt || 0);
+      var realTime = Number(real && real.__updatedAt || 0);
+      if(!real || incomingTime > realTime) chosen = incoming;
+    }
+
+    if(!chosen) return null;
+
+    chosen.__updatedAt = Date.now();
+    chosen.__syncVersion = VERSION;
+    chosen = normalizeState(chosen);
+
+    setRealState(chosen);
+    writeLocal(chosen);
+    scheduleFirebase(chosen, reason || 'auto');
+
+    return chosen;
+  }
+
+  function rerenderCurrent(){
+    var page = window.__kaizenDesiredPage || localStorage.getItem('kaizen-last-page') || 'dashboard';
+
+    try { currentPage = page; } catch(e) {}
+
+    try {
+      if(typeof window.go === 'function') window.go(page);
+      else if(typeof go === 'function') go(page);
+    } catch(e) {}
+
+    try {
+      if(typeof window.renderPage === 'function') window.renderPage(page);
+      else if(typeof renderPage === 'function') renderPage(page);
+    } catch(e) {}
+
+    try { if(typeof window.fillSelects === 'function') window.fillSelects(); } catch(e) {}
+    try { if(typeof fillSelects === 'function') fillSelects(); } catch(e) {}
+    try { if(typeof window.updateBadges === 'function') window.updateBadges(); } catch(e) {}
+    try { if(typeof updateBadges === 'function') updateBadges(); } catch(e) {}
+  }
+
+  function finishBoot(){
+    try { if(typeof window.__kaizenUnlockPersistenceV9 === 'function') window.__kaizenUnlockPersistenceV9(); } catch(e) {}
+    try { document.documentElement.classList.remove('kaizen-syncing'); } catch(e) {}
+    try { if(typeof window.__splashFinish === 'function') window.__splashFinish(); } catch(e) {}
+  }
+
+  function patchPersistFunctions(){
+    window.persist = function(){ return saveNow('persist'); };
+    try { persist = window.persist; } catch(e) {}
+
+    window.kaizenForceSave = function(){ return saveNow('manual'); };
+    window._fbSave = function(data, opts){
+      var reason = opts && opts.force ? 'force' : 'direct';
+      return saveNow(reason, data);
+    };
+    window._fbLoad = readFirebaseState;
+
+    window.kaizenHardReloadFromFirebase = async function(){
+      var fb = await readFirebaseState();
+      if(fb){
+        firebaseChecked = true;
+        var normalized = mergeRuntimeDefaults(normalizeState(fb), getRealState());
+        normalized.__updatedAt = Number(normalized.__updatedAt || Date.now());
+        normalized.__syncVersion = VERSION;
+        setRealState(normalized);
+        writeLocal(normalized);
+        rerenderCurrent();
+      }
+      return fb;
+    };
+
+    window.kaizenSyncStatus = function(){
+      var st = getRealState() || {};
+      return {
+        version: VERSION,
+        restoreDone: restoreDone,
+        firebaseChecked: firebaseChecked,
+        firebaseReady: !!getFirebaseDoc(),
+        updatedAt: st.__updatedAt || null,
+        updatedAtHuman: st.__updatedAt ? new Date(st.__updatedAt).toLocaleString() : null,
+        clients: Array.isArray(st.clients) ? st.clients.map(function(c){ return c.name; }) : [],
+        blockedStartupWrites: (window.__kaizenBlockedStateWritesV9 || []).length,
+        keys: STATE_KEYS.slice()
+      };
+    };
+  }
+
+  function wrapMutator(name){
+    var fn = window[name];
+    if(typeof fn !== 'function' || fn.__kaizenV9Wrapped) return;
+
+    var wrapped = function(){
+      var result = fn.apply(this, arguments);
+      userChangedAfterRestore = restoreDone;
+      setTimeout(function(){ saveNow(name); }, 80);
+      return result;
+    };
+
+    wrapped.__kaizenV9Wrapped = true;
+    window[name] = wrapped;
+  }
+
+  function wrapAllMutators(){
+    [
+      'saveClient',
+      'deleteClient',
+      'saveProspect',
+      'moveProspect',
+      'deleteProspect',
+      'saveTask',
+      'changeTaskStatus',
+      'deleteTask',
+      'saveMember',
+      'deleteMember',
+      'saveEvent',
+      'saveReport',
+      'toggleOnboarding',
+      'saveGoalV5',
+      'savePackageV5',
+      'loginAdminV5',
+      'loginOperatorV5',
+      'logoutV5',
+      'loginV6',
+      'logoutV6'
+    ].forEach(wrapMutator);
+
+    var goFn = window.go;
+    if(typeof goFn === 'function' && !goFn.__kaizenV9PageWrapped){
+      var wrappedGo = function(page){
+        try { localStorage.setItem('kaizen-last-page', page || 'dashboard'); } catch(e) {}
+        return goFn.apply(this, arguments);
+      };
+      wrappedGo.__kaizenV9PageWrapped = true;
+      window.go = wrappedGo;
+    }
+  }
+
+  function startWatchdog(){
+    clearInterval(watchTimer);
+    watchTimer = setInterval(function(){
+      if(!restoreDone) return;
+      var st = getRealState();
+      if(!isObject(st)) return;
+      try {
+        var json = JSON.stringify(st);
+        if(json !== lastSnapshot){
+          saveNow('watch');
+        }
+      } catch(e) {}
+    }, 1200);
+  }
+
+  function installDomListeners(){
+    document.addEventListener('change', function(){
+      if(!restoreDone) return;
+      userChangedAfterRestore = true;
+      setTimeout(function(){ saveNow('change'); }, 120);
+    }, true);
+
+    document.addEventListener('click', function(evt){
+      if(!restoreDone) return;
+      var el = evt.target;
+      while(el && el !== document){
+        var text = String(el.textContent || '').toLowerCase();
+        var onclick = String(el.getAttribute && el.getAttribute('onclick') || '').toLowerCase();
+        if(
+          onclick.indexOf('save') !== -1 ||
+          onclick.indexOf('guardar') !== -1 ||
+          text.indexOf('guardar') !== -1 ||
+          text.indexOf('eliminar') !== -1 ||
+          text.indexOf('mover') !== -1
+        ){
+          userChangedAfterRestore = true;
+          setTimeout(function(){ saveNow('click'); }, 180);
+          return;
+        }
+        el = el.parentNode;
+      }
+    }, true);
+  }
+
+  async function restore(){
+    patchPersistFunctions();
+
+    var runtimeState = normalizeState(safeClone(getRealState()));
+    var candidates = readLocalCandidates();
+    var firebaseResult = await withTimeout(readFirebaseState(), 3500);
+
+    if(!firebaseResult.timedOut){
+      firebaseChecked = true;
+      var fbCandidate = makeCandidate('firebase', firebaseResult.value);
+      if(fbCandidate) candidates.push(fbCandidate);
+    } else {
+      readFirebaseState().then(function(fb){
+        firebaseChecked = true;
+        if(!fb || userChangedAfterRestore) return;
+        var current = makeCandidate('current', getRealState());
+        var remote = makeCandidate('firebase-late', fb);
+        if(remote && (!current || Number(remote.updatedAt || 0) > Number(current.updatedAt || 0))){
+          var mergedLate = mergeRuntimeDefaults(remote.state, getRealState());
+          setRealState(mergedLate);
+          writeLocal(mergedLate);
+          rerenderCurrent();
+        }
+      });
+    }
+
+    var currentCandidate = makeCandidate('current', runtimeState);
+    if(currentCandidate) candidates.push(currentCandidate);
+
+    var best = chooseBest(candidates);
+    var chosen = best ? best.state : (runtimeState || {});
+    chosen = mergeRuntimeDefaults(chosen, runtimeState);
+    chosen.__updatedAt = Number(chosen.__updatedAt || Date.now());
+    chosen.__syncVersion = VERSION;
+
+    setRealState(chosen);
+    writeLocal(chosen);
+
+    restoreDone = true;
+    window._fbAllowSave = true;
+
+    patchPersistFunctions();
+    wrapAllMutators();
+    setTimeout(wrapAllMutators, 500);
+    setTimeout(wrapAllMutators, 1600);
+    setTimeout(wrapAllMutators, 3200);
+
+    rerenderCurrent();
+    finishBoot();
+
+    if(firebaseChecked){
+      scheduleFirebase(chosen, 'restore');
+    }
+
+    startWatchdog();
+    console.log('Kaizen V9: estado restaurado desde', best ? best.source : 'runtime', window.kaizenSyncStatus());
+  }
+
+  installDomListeners();
+  restore().catch(function(error){
+    console.warn('Kaizen V9 restore error:', error);
+    restoreDone = true;
+    finishBoot();
+    startWatchdog();
+  });
+})();
+</script>
+
 
 <!-- ── SERVICE WORKER REGISTRATION ── -->
 <script>
