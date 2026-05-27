@@ -40,7 +40,7 @@
     const cloudData = await window._fbLoad();
     if(cloudData) {
       window.state = cloudData;
-      localStorage.setItem('kaizen-pro-v1', JSON.stringify(cloudData));
+      try{localStorage.setItem('kaizen-pro-v1', JSON.stringify(cloudData))}catch(e){}
       console.log('✓ Datos cargados desde Firebase');
       if(window.go) window.go('dashboard');
     } else {
@@ -2131,7 +2131,7 @@ boot();
     baseEvents.forEach(e=>{ if(!state.events.some(x=>x.id===e.id)) state.events.push(e); });
     save();
   }
-  function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); localStorage.setItem('kaizen-pro-v1', JSON.stringify(state)); }
+  function save(){ try{localStorage.setItem(LS_KEY, JSON.stringify(state)); try{localStorage.setItem('kaizen-pro-v1', JSON.stringify(state)); }}catch(e){}
   window.persist = save;
 
   function clientPrice(c){ return Number((state.packages[c.pkg]||{}).price || c.price || 0); }
@@ -2449,8 +2449,8 @@ boot();
     save();
   }
   function save(){
-    localStorage.setItem(LS_KEY, JSON.stringify(state));
-    localStorage.setItem('kaizen-pro-v1', JSON.stringify(state));
+    try{localStorage.setItem(LS_KEY, JSON.stringify(state))}catch(e){}
+    try{localStorage.setItem('kaizen-pro-v1', JSON.stringify(state))}catch(e){}
   }
   window.persist = save;
 
@@ -2908,7 +2908,7 @@ boot();
     if(n>=1000)return sign+'$'+(n/1000).toFixed(0)+'K';
     return sign+'$'+n;
   };
-  function save(){localStorage.setItem(LS,JSON.stringify(state));localStorage.setItem('kaizen-pro-v1',JSON.stringify(state));}
+  function save(){try{localStorage.setItem(LS,JSON.stringify(state));try{localStorage.setItem('kaizen-pro-v1',JSON.stringify(state));}}catch(e){}
   window.persist=save;
 
   function load(){
@@ -3479,8 +3479,8 @@ boot();
       {id:'e_sp_report',title:'Reporte Superpizza FA3 · cierre mes promo',date:'2026-06-30',type:'Reporte',client:'Superpizza FA3'}
     ];
     baseEvents.forEach(e=>{if(!state.events.some(x=>x.id===e.id))state.events.push(e)});
-    localStorage.setItem(LS_V6,JSON.stringify(state));
-    localStorage.setItem('kaizen-pro-v1',JSON.stringify(state));
+    try{localStorage.setItem(LS_V6,JSON.stringify(state))}catch(e){}
+    try{localStorage.setItem('kaizen-pro-v1',JSON.stringify(state))}catch(e){}
   }
 
   function roleV6(){return sessionStorage.getItem(SESSION_V6)||''}
@@ -3644,8 +3644,8 @@ boot();
   window.updatePackageV6=function(name,key,val){
     if(!window.isAdmin())return toast('Solo administrador');
     state.packages[name][key]=Number(val||0);
-    localStorage.setItem(LS_V6,JSON.stringify(state));
-    localStorage.setItem('kaizen-pro-v1',JSON.stringify(state));
+    try{localStorage.setItem(LS_V6,JSON.stringify(state))}catch(e){}
+    try{localStorage.setItem('kaizen-pro-v1',JSON.stringify(state))}catch(e){}
     renderPaquetes();
     toast('Paquete actualizado');
   }
@@ -3653,8 +3653,8 @@ boot();
     if(!window.isAdmin())return toast('Solo administrador');
     state.catalog[name]=state.catalog[name]||{};
     state.catalog[name][key]=key==='deliverables'?val.split('\n').map(x=>x.trim()).filter(Boolean):val;
-    localStorage.setItem(LS_V6,JSON.stringify(state));
-    localStorage.setItem('kaizen-pro-v1',JSON.stringify(state));
+    try{localStorage.setItem(LS_V6,JSON.stringify(state))}catch(e){}
+    try{localStorage.setItem('kaizen-pro-v1',JSON.stringify(state))}catch(e){}
     renderPaquetes();
     toast('Catálogo actualizado');
   }
