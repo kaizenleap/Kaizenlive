@@ -2245,11 +2245,41 @@ body::before {
 <div class="modal-overlay" id="modal-member">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('member')">×</button>
-    <h2>Nuevo Miembro</h2>
-    <div class="field"><label>Nombre</label><input id="mName" placeholder="Andrea Gómez"></div>
+    <h2 id="mModalTitle">Nuevo Miembro</h2>
+    <input type="hidden" id="mEditId">
+
+    <!-- Foto -->
+    <div style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:16px">
+      <div id="mPhotoPreview" style="width:80px;height:80px;border-radius:50%;background:var(--surface2);border:2px dashed var(--border2);display:flex;align-items:center;justify-content:center;font-size:28px;overflow:hidden;cursor:pointer" onclick="document.getElementById('mPhotoInput').click()">
+        <span id="mPhotoIcon" style="color:var(--sub)">📷</span>
+        <img id="mPhotoImg" style="width:100%;height:100%;object-fit:cover;display:none">
+      </div>
+      <input type="file" id="mPhotoInput" accept="image/*" style="display:none" onchange="previewMemberPhoto(this)">
+      <input type="hidden" id="mPhotoData">
+      <button class="btn ghost sm" onclick="document.getElementById('mPhotoInput').click()">Subir foto</button>
+    </div>
+
+    <div class="field"><label>Nombre completo</label><input id="mName" placeholder="Andrea Gómez"></div>
     <div class="form-grid">
-      <div class="field"><label>Rol</label><input id="mRole" placeholder="Editora, Presentadora..."></div>
+      <div class="field"><label>Rol / Cargo</label><input id="mRole" placeholder="Editora, Presentadora..."></div>
+      <div class="field"><label>Área</label><select id="mArea">
+        <option value="">Sin área</option>
+        <option value="Producción">Producción</option>
+        <option value="Edición">Edición</option>
+        <option value="Dirección">Dirección</option>
+        <option value="Comercial">Comercial</option>
+        <option value="Diseño">Diseño</option>
+        <option value="Operaciones">Operaciones</option>
+        <option value="Community">Community</option>
+      </select></div>
+    </div>
+    <div class="form-grid">
       <div class="field"><label>Pago base ($)</label><input id="mPay" type="number" placeholder="500000"></div>
+      <div class="field"><label>Estado</label><select id="mStatus">
+        <option value="Activo">Activo</option>
+        <option value="Tiempo parcial">Tiempo parcial</option>
+        <option value="Inactivo">Inactivo</option>
+      </select></div>
     </div>
     <div class="field"><label>Responsabilidad principal</label><input id="mResp" placeholder="Editar 4 videos semanales..."></div>
     <div class="modal-footer">
@@ -2866,13 +2896,58 @@ function renderProduccion(){
 }
 
 // ─── EQUIPO & SOP ─────────────────────────────────────────────────────────────
+function previewMemberPhoto(input){
+  const file=input.files[0];
+  if(!file)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    const img=$('#mPhotoImg'),icon=$('#mPhotoIcon');
+    img.src=e.target.result;
+    img.style.display='block';
+    icon.style.display='none';
+    $('#mPhotoData').value=e.target.result;
+  };
+  r.readAsDataURL(file);
+}
+function openMemberModal(id){
+  // reset
+  $('#mEditId').value='';
+  $('#mModalTitle').textContent='Nuevo Miembro';
+  $('#mName').value='';$('#mRole').value='';$('#mPay').value='';$('#mResp').value='';
+  $('#mArea').value='';$('#mStatus').value='Activo';
+  $('#mPhotoData').value='';$('#mPhotoImg').src='';$('#mPhotoImg').style.display='none';$('#mPhotoIcon').style.display='';
+  if(id){
+    const m=state.members.find(x=>x.id===id);
+    if(!m)return;
+    $('#mEditId').value=id;
+    $('#mModalTitle').textContent='Editar Miembro';
+    $('#mName').value=m.name;$('#mRole').value=m.role||'';$('#mPay').value=m.pay||'';$('#mResp').value=m.resp||'';
+    $('#mArea').value=m.area||'';$('#mStatus').value=m.status||'Activo';
+    if(m.photo){$('#mPhotoData').value=m.photo;$('#mPhotoImg').src=m.photo;$('#mPhotoImg').style.display='block';$('#mPhotoIcon').style.display='none';}
+  }
+  openModal('member');
+}
 function saveMember(){
   const name=$('#mName').value.trim();
   if(!name)return toast('Falta nombre');
-  state.members.push({id:uid(),name,role:$('#mRole').value,pay:Number($('#mPay').value||0),resp:$('#mResp').value});
-  closeModal('member');persist();renderEquipo();toast('Miembro agregado ✓');
+  const editId=$('#mEditId').value;
+  const data={name,role:$('#mRole').value,pay:Number($('#mPay').value||0),resp:$('#mResp').value,area:$('#mArea').value,status:$('#mStatus').value,photo:$('#mPhotoData').value||''};
+  if(editId){
+    const idx=state.members.findIndex(m=>m.id===editId);
+    if(idx>-1)state.members[idx]={...state.members[idx],...data};
+    toast('Miembro actualizado ✓');
+  } else {
+    state.members.push({id:uid(),...data});
+    toast('Miembro agregado ✓');
+  }
+  closeModal('member');persist();renderEquipo();
 }
-function deleteMember(id){state.members=state.members.filter(m=>m.id!==id);persist();renderEquipo()}
+function deleteMember(id){
+  if(!confirm('¿Eliminar este miembro?'))return;
+  state.members=state.members.filter(m=>m.id!==id);persist();renderEquipo();
+}
+window.openMemberModal=openMemberModal;
+window.previewMemberPhoto=previewMemberPhoto;
 
 const sopRules=[
   {rule:'Sin 50% de anticipo no hay grabación ni reserva de equipo.',icon:'💰',tag:'red'},
@@ -2889,45 +2964,63 @@ const sopRules=[
 
 function renderEquipo(){
   const totalPay=state.members.reduce((s,m)=>s+Number(m.pay||0),0);
+  const areaColor={Producción:'blue',Edición:'purple',Dirección:'accent',Comercial:'green',Diseño:'gold',Operaciones:'gold',Community:'blue'};
+  const statusColor={Activo:'green','Tiempo parcial':'gold',Inactivo:'red'};
   $('#equipo-content').innerHTML = `
-    <div class="split" style="margin-bottom:20px">
-      <div>
-        <div class="section-title">Equipo & SOP</div>
-        <div style="color:var(--sub);font-size:14px">${state.members.length} personas · ${fmtShort(totalPay)} en nómina</div>
-      </div>
-      <button class="btn primary" onclick="openModal('member')">+ Miembro</button>
+    <div class="hero-section" style="padding:28px 0 20px">
+      <span class="kicker">Tu equipo</span>
+      <h1 style="font-size:clamp(22px,4vw,32px);margin-bottom:8px">Equipo & SOP</h1>
+      <p style="color:var(--sub);font-size:14px">${state.members.length} persona${state.members.length!==1?'s':''} · <strong style="color:var(--accent)">${fmtShort(totalPay)}</strong> en nómina mensual</p>
     </div>
 
-    <div class="grid g2" style="margin-bottom:24px">
-      ${state.members.map(m=>`
-        <div class="card">
-          <div style="display:flex;gap:14px;align-items:center">
-            <div class="avatar" style="width:44px;height:44px;font-size:16px">${m.name.slice(0,2).toUpperCase()}</div>
-            <div style="flex:1">
-              <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">${m.name}</div>
-              <span class="tag purple" style="margin-top:4px">${m.role||'—'}</span>
+    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+      <button class="btn primary" onclick="openMemberModal()">+ Agregar miembro</button>
+    </div>
+
+    <div class="grid g2" style="margin-bottom:32px">
+      ${state.members.map(m=>{
+        const initials=m.name.slice(0,2).toUpperCase();
+        const aTag=m.area?`<span class="tag ${areaColor[m.area]||'blue'}" style="font-size:10px">${m.area}</span>`:'';
+        const sTag=m.status&&m.status!=='Activo'?`<span class="tag ${statusColor[m.status]||'gold'}" style="font-size:10px">${m.status}</span>`:'';
+        const photoEl=m.photo
+          ?`<img src="${m.photo}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--border2)">`
+          :`<div class="avatar" style="width:52px;height:52px;font-size:17px;flex-shrink:0">${initials}</div>`;
+        return `
+        <div class="card" style="position:relative;overflow:hidden">
+          <div style="position:absolute;top:0;right:0;width:60px;height:60px;background:radial-gradient(circle at top right,var(--accent-glow),transparent 70%);pointer-events:none"></div>
+          <div style="display:flex;gap:14px;align-items:flex-start">
+            ${photoEl}
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:700;font-size:15px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.name}</div>
+              <div style="color:var(--sub);font-size:12px;margin-bottom:6px">${m.role||'Sin rol definido'}</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">${aTag}${sTag}</div>
             </div>
-            <div style="text-align:right">
-              <div style="font-family:'Syne',sans-serif;font-weight:700;color:var(--accent)">${fmtShort(m.pay)}</div>
-              <div style="font-size:11px;color:var(--sub)">mensual</div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-weight:800;color:var(--accent);font-size:15px">${fmtShort(m.pay)}</div>
+              <div style="font-size:10px;color:var(--sub)">/ mes</div>
             </div>
           </div>
-          ${m.resp?`<div style="margin-top:12px;padding:10px 12px;background:var(--bg);border-radius:8px;font-size:13px;color:var(--sub)">${m.resp}</div>`:''}
-          ${m.id!=='m1'?`<button class="btn danger sm" style="margin-top:10px" onclick="deleteMember('${m.id}')">Eliminar</button>`:''}
-        </div>`).join('')}
+          ${m.resp?`<div style="margin-top:12px;padding:9px 12px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--sub);border-left:2px solid var(--border2)">📌 ${m.resp}</div>`:''}
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn ghost sm" style="flex:1" onclick="openMemberModal('${m.id}')">✏️ Editar</button>
+            ${m.id!=='m1'?`<button class="btn danger sm" onclick="deleteMember('${m.id}')">Eliminar</button>`:'<span style="font-size:11px;color:var(--sub2);align-self:center;padding:0 6px">Propietario</span>'}
+          </div>
+        </div>`;}).join('')}
     </div>
 
-    <div class="section-title" style="margin-bottom:16px">Reglas de Operación (SOP)</div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <div class="section-title" style="margin:0">Reglas de Operación (SOP)</div>
+      <span class="tag purple" style="font-size:11px">${sopRules.length} reglas</span>
+    </div>
     <div class="grid g2">
       ${sopRules.map((s,i)=>`
-        <div class="card">
-          <div style="display:flex;gap:12px;align-items:flex-start">
-            <div style="width:36px;height:36px;background:var(--surface2);border-radius:10px;display:grid;place-items:center;font-size:18px;flex-shrink:0">${s.icon}</div>
-            <div>
-              <div style="font-size:11px;color:var(--sub);margin-bottom:4px">Regla ${i+1}</div>
-              <div style="font-size:14px;font-weight:500">${s.rule}</div>
-            </div>
+        <div class="card" style="display:flex;gap:12px;align-items:flex-start;padding:14px 16px">
+          <div style="width:38px;height:38px;background:var(--surface2);border-radius:10px;display:grid;place-items:center;font-size:18px;flex-shrink:0;border:1px solid var(--border)">${s.icon}</div>
+          <div style="flex:1">
+            <div style="font-size:10px;color:var(--sub);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Regla ${i+1}</div>
+            <div style="font-size:13px;font-weight:500;line-height:1.5">${s.rule}</div>
           </div>
+          <span class="tag ${s.tag}" style="font-size:10px;flex-shrink:0;align-self:flex-start"></span>
         </div>`).join('')}
     </div>
   `;
@@ -3611,22 +3704,7 @@ boot();
   }
 
   function enhanceMemberModal(){
-    const modal = document.querySelector('#modal-member .modal');
-    modal.innerHTML = `
-      <button class="modal-close" onclick="closeModal('member')">×</button>
-      <h2>Nuevo Miembro</h2>
-      <div class="field"><label>Nombre</label><input id="mName" placeholder="Andrea Gómez"></div>
-      <div class="form-grid">
-        <div class="field"><label>Rol</label><select id="mRole"><option>Presentadora</option><option>Editora</option><option>Grabador/a</option><option>Editor + cámara</option><option>Community manager</option><option>Asistente</option><option>Dirección</option><option>Otro</option></select></div>
-        <div class="field"><label>Pago base ($)</label><input id="mPay" type="number" placeholder="500000"></div>
-        <div class="field"><label>Tipo de pago</label><select id="mType"><option>Por paquete</option><option>Por sesión</option><option>Por cliente</option><option>Mensual fijo</option><option>Freelance</option></select></div>
-        <div class="field"><label>Estado</label><select id="mStatus"><option>Activo</option><option>Backup</option><option>Por validar</option><option>Inactivo</option></select></div>
-        <div class="field"><label>Disponibilidad</label><input id="mAvail" placeholder="Mar/Jue AM"></div>
-        <div class="field"><label>Capacidad semanal</label><input id="mCap" type="number" placeholder="4"></div>
-      </div>
-      <div class="field"><label>Responsabilidad principal</label><input id="mResp" placeholder="Editar 4 videos semanales..."></div>
-      <div class="modal-footer"><button class="btn ghost" onclick="closeModal('member')">Cancelar</button><button class="btn primary" onclick="saveMember()">Guardar</button></div>
-    `;
+    // Modal already upgraded with photo, area, edit support globally — no override needed
   }
 
   function fillSelects(){
@@ -5567,13 +5645,18 @@ boot();
     wrapped.__kaizenSyncWrapped = true;
     window[name] = wrapped;
   }
+  // Expose member helpers globally so inline onclick works
+  window.openMemberModal = window.openMemberModal || (typeof openMemberModal!=='undefined'?openMemberModal:null);
+  window.previewMemberPhoto = window.previewMemberPhoto || (typeof previewMemberPhoto!=='undefined'?previewMemberPhoto:null);
+
   function wrapAllMutators(){
     [
       'saveClient','deleteClient','saveProspect','moveProspect','deleteProspect',
       'saveTask','changeTaskStatus','deleteTask','saveMember','deleteMember',
+      'openMemberModal','previewMemberPhoto',
       'saveEvent','saveReport','toggleOnboarding','saveGoalV5','savePackageV5',
       'exportData','loginAdminV5','loginOperatorV5'
-    ].forEach(wrapMutator);
+    ].forEach(fn=>{ if(typeof window[fn]==='function' && !window[fn].__wrapped){ const orig=window[fn]; window[fn]=function(){return orig.apply(this,arguments);}; window[fn].__wrapped=true; } });
 
     const go = window.go;
     if(typeof go === 'function' && !go.__kaizenPageWrapped){
