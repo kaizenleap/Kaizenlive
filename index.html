@@ -3302,7 +3302,13 @@ boot();
 
     let sp = state.clients.find(c => c.id===superpizza.id || (c.name||'').toLowerCase().includes('super'));
     if(!sp){ state.clients.unshift({...superpizza}); }
-    else { Object.assign(sp, {...superpizza, ...sp, id:sp.id||superpizza.id, onboarding:{...superpizza.onboarding, ...(sp.onboarding||{})}}); }
+    else {
+      // FIX: datos guardados tienen prioridad. Solo completamos campos vacíos.
+      const id = sp.id||superpizza.id;
+      const onboarding = {...superpizza.onboarding, ...(sp.onboarding||{})};
+      Object.keys(superpizza).forEach(k=>{ if(sp[k]===undefined||sp[k]===null||sp[k]==='') sp[k]=superpizza[k]; });
+      sp.id = id; sp.onboarding = onboarding;
+    }
 
     if(!state.members.some(m=>m.id==='m_owner')) state.members.unshift({id:'m_owner',name:'Tú',role:'Dirección',pay:0,type:'Dueño',status:'Activo',avail:'Estrategia y gestión',cap:10,resp:'Ventas, estrategia, relación con clientes y control de calidad'});
     if(!state.members.some(m=>m.id==='m_presentadora')) state.members.push({id:'m_presentadora',name:'Presentadora principal',role:'Presentadora',pay:200000,type:'Por paquete',status:'Activo',avail:'Por definir',cap:4,resp:'Promo Confianza: COP $50.000 por sesión x 4 = COP $200.000'});
@@ -3620,9 +3626,13 @@ boot();
     let sp = state.clients.find(c => c.id===SUPERPIZZA.id || (c.name||'').toLowerCase().includes('super'));
     if(!sp){ state.clients.unshift(deepClone(SUPERPIZZA)); }
     else {
+      // FIX: datos guardados tienen prioridad. Solo completamos campos vacíos.
+      const defaults = deepClone(SUPERPIZZA);
       const keepId = sp.id || SUPERPIZZA.id;
-      const keepOnboarding = sp.onboarding || {};
-      Object.assign(sp, deepClone(SUPERPIZZA), sp, {id:keepId, onboarding:{...deepClone(SUPERPIZZA.onboarding), ...keepOnboarding}});
+      const keepOnboarding = {...deepClone(SUPERPIZZA.onboarding), ...(sp.onboarding||{})};
+      Object.keys(defaults).forEach(k=>{ if(sp[k]===undefined||sp[k]===null||sp[k]==='') sp[k]=defaults[k]; });
+      sp.id = keepId;
+      sp.onboarding = keepOnboarding;
     }
 
     if(!state.members.some(m=>m.id==='m_owner')) state.members.unshift(deepClone(DEFAULT_STATE.members[0]));
@@ -4107,13 +4117,11 @@ boot();
     let sp=state.clients.find(c=>c.id===SUPER.id || (c.name||'').toLowerCase().includes('super'));
     if(!sp) state.clients.unshift(clone(SUPER));
     else{
-      // FIX: los datos guardados tienen prioridad sobre los defaults hardcodeados.
-      // Solo completamos campos que faltan (id, onboarding), nunca sobreescribimos nombre u otros datos editados.
-      const id=sp.id||SUPER.id;
-      const onboarding={...clone(SUPER.onboarding), ...(sp.onboarding||{})};
-      // Rellenar solo campos que no existen en el registro guardado, nunca pisar lo que el usuario editó.
+      // FIX: datos guardados tienen prioridad. Solo completamos campos vacíos.
       const defaults=clone(SUPER);
-      Object.keys(defaults).forEach(k=>{ if(sp[k]===undefined || sp[k]===null || sp[k]==='') sp[k]=defaults[k]; });
+      const id=sp.id||SUPER.id;
+      const onboarding={...clone(SUPER.onboarding),...(sp.onboarding||{})};
+      Object.keys(defaults).forEach(k=>{ if(sp[k]===undefined||sp[k]===null||sp[k]==='') sp[k]=defaults[k]; });
       sp.id=id;
       sp.onboarding=onboarding;
     }
@@ -5585,8 +5593,9 @@ boot();
   }
 
   async function saveNow(reason){
-    const real = stamp(getRealState());
+    let real = stamp(getRealState());
     if(!real || saving) return;
+    real = sanitizeSuperClients(real);
     setRealState(real);
     writeLocal(real);
     lastSnapshot = JSON.stringify(real);
@@ -5614,6 +5623,32 @@ boot();
     }
   }
 
+  // Sanitiza el cliente "super" en cualquier estado antes de aplicarlo.
+  // Garantiza que los datos guardados (nombre, paquete, notas, etc.) nunca sean
+  // pisados por los defaults hardcodeados, sin importar si el estado viene de
+  // Firebase, localStorage o memoria.
+  function sanitizeSuperClients(st){
+    if(!st || !Array.isArray(st.clients)) return st;
+    // Buscar definiciones SUPER conocidas en el scope global
+    const supers = [];
+    try{ if(typeof SUPERPIZZA!=='undefined') supers.push(SUPERPIZZA); }catch(e){}
+    try{ if(typeof SUPER!=='undefined') supers.push(SUPER); }catch(e){}
+    supers.forEach(function(DEF){
+      const sp = st.clients.find(c=> c.id===DEF.id || (c.name||'').toLowerCase().includes('super'));
+      if(!sp) return;
+      const defaults = JSON.parse(JSON.stringify(DEF));
+      const id = sp.id || DEF.id;
+      const onboarding = Object.assign({}, defaults.onboarding, sp.onboarding||{});
+      // Solo rellena campos vacíos/nulos; NUNCA sobreescribe lo que el usuario editó
+      Object.keys(defaults).forEach(function(k){
+        if(sp[k]===undefined||sp[k]===null||sp[k]==='') sp[k]=defaults[k];
+      });
+      sp.id = id;
+      sp.onboarding = onboarding;
+    });
+    return st;
+  }
+
   async function restoreFromBestSource(){
     const firebaseState = await readFirebaseState();
     let localState = bestLocalState();
@@ -5634,6 +5669,7 @@ boot();
     }
 
     if(chosen){
+      chosen = sanitizeSuperClients(chosen);
       setRealState(chosen);
       writeLocal(chosen);
       window._fbLoaded = true;
