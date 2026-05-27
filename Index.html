@@ -961,27 +961,32 @@ nav::-webkit-scrollbar{display:none}
   // Save current page on navigation
   window.addEventListener("load", async () => {
     const lastPage = localStorage.getItem("kaizen-last-page") || "dashboard";
-    // Hook persist after ALL scripts have loaded
+
+    // Wait 2 seconds for ALL scripts to finish loading state from localStorage
+    await new Promise(r => setTimeout(r, 2000));
+
     function hookFirebase() {
       const _op = persist;
-      persist = function() { _op(); window._fbSave(window.state); };
-      window.persist = persist;
+      if(_op && !_op._fbHooked) {
+        persist = function() { _op(); window._fbSave(window.state); };
+        persist._fbHooked = true;
+        window.persist = persist;
+      }
       console.log("✓ Firebase hook activado");
     }
-    hookFirebase();
-    setTimeout(hookFirebase, 500);
-    setTimeout(hookFirebase, 1500);
 
     const d = await window._fbLoad();
     if(d) {
       window.state = d;
-      console.log("✓ Datos cargados desde Firebase");
+      // Force all scripts to use the Firebase state
       if(window.go) window.go(lastPage);
-      // Re-hook after loading data
-      hookFirebase();
+      console.log("✓ Datos cargados desde Firebase");
     } else {
       console.log("Sin datos en Firebase aún");
     }
+
+    hookFirebase();
+    setTimeout(hookFirebase, 1000);
   });
 </script>
 </head>
