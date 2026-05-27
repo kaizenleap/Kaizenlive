@@ -940,6 +940,13 @@ nav::-webkit-scrollbar{display:none}
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script>
+/* ─────────────────────────────────────────────────────────────
+   FIREBASE FIX · fuente única de datos y protección anti-reset
+   - Bloquea guardados de arranque para que los defaults no borren Firestore.
+   - Sincroniza todas las llaves históricas de localStorage.
+   - Conserva la última página abierta.
+───────────────────────────────────────────────────────────── */
+(function(){
   const firebaseConfig = {
     apiKey: "AIzaSyCdFXfoCBEZCT2tyRUHRJZT5tYbq8CHWWQ",
     authDomain: "kaizenlive.firebaseapp.com",
@@ -948,46 +955,112 @@ nav::-webkit-scrollbar{display:none}
     messagingSenderId: "659479963267",
     appId: "1:659479963267:web:42e3bc0885ebfce7335db6"
   };
-  firebase.initializeApp(firebaseConfig);
+
+  if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+
+  const FB_STATE_KEYS = [
+    'kaizen-pro-v1',
+    'kaizen-pro-v2-completo',
+    'kaizen-liveops-pro-v4-empresarial',
+    'kaizen-liveops-pro-v5-control-total',
+    'kaizen-liveops-pro-v6-control-total'
+  ];
+
   const _fbDB = firebase.firestore();
-  const _fbDOC = _fbDB.collection("kaizen").doc("state");
-  window._fbSave = async function(data) {
-    try { await _fbDOC.set({ data: JSON.stringify(data) }); console.log("✓ Firebase guardado"); } catch(e) { console.warn("Firebase save error:", e); }
-  };
-  window._fbLoad = async function() {
-    try { const s = await _fbDOC.get(); if(s.exists) return JSON.parse(s.data().data); } catch(e) { console.warn("Firebase load error:", e); }
-    return null;
-  };
-  // Save current page on navigation
-  window.addEventListener("load", async () => {
-    const lastPage = localStorage.getItem("kaizen-last-page") || "dashboard";
+  const _fbDOC = _fbDB.collection('kaizen').doc('state');
+  let _fbTimer = null;
+  window._fbAllowSave = false;
 
-    // Wait 2 seconds for ALL scripts to finish loading state from localStorage
-    await new Promise(r => setTimeout(r, 2000));
-
-    function hookFirebase() {
-      const _op = persist;
-      if(_op && !_op._fbHooked) {
-        persist = function() { _op(); window._fbSave(window.state); };
-        persist._fbHooked = true;
-        window.persist = persist;
-      }
-      console.log("✓ Firebase hook activado");
+  function safeParse(v){ try{return JSON.parse(v)}catch(e){return null} }
+  function cleanClone(o){ try{return JSON.parse(JSON.stringify(o))}catch(e){return o} }
+  function stateScore(s){
+    if(!s || typeof s !== 'object') return 0;
+    return JSON.stringify(s).length
+      + ((s.clients||[]).length*1200)
+      + ((s.prospects||[]).length*700)
+      + ((s.tasks||[]).length*400)
+      + ((s.reports||[]).length*900)
+      + ((s.events||[]).length*250);
+  }
+  function getBestLocalState(){
+    let best = null, bestScore = -1;
+    FB_STATE_KEYS.forEach(k=>{
+      const data = safeParse(localStorage.getItem(k));
+      const score = stateScore(data);
+      if(data && score > bestScore){ best = data; bestScore = score; }
+    });
+    return best;
+  }
+  function chooseState(firebaseState, localState){
+    if(firebaseState && localState){
+      const fu = Number(firebaseState.__updatedAt || 0);
+      const lu = Number(localState.__updatedAt || 0);
+      if(fu || lu) return lu >= fu ? localState : firebaseState;
+      // Para la primera corrección: si no hay timestamps, protegemos lo editado en este navegador.
+      return localState;
     }
+    return firebaseState || localState || null;
+  }
+  function stamp(data){
+    const copy = cleanClone(data || {});
+    if(copy && typeof copy === 'object') copy.__updatedAt = Date.now();
+    return copy;
+  }
+  function writeLocalEverywhere(data){
+    FB_STATE_KEYS.forEach(k=>{ try{ localStorage.setItem(k, JSON.stringify(data)); }catch(e){} });
+  }
 
-    const d = await window._fbLoad();
-    if(d) {
+  window._fbSave = async function(data, opts){
+    if(!data) return;
+    if(!window._fbAllowSave && !(opts && opts.force)){
+      console.log('Firebase save ignorado durante arranque');
+      return;
+    }
+    clearTimeout(_fbTimer);
+    _fbTimer = setTimeout(async ()=>{
+      const payload = stamp(data);
+      try{
+        writeLocalEverywhere(payload);
+        await _fbDOC.set({ data: JSON.stringify(payload), updatedAt: payload.__updatedAt }, { merge:true });
+        console.log('✓ Firebase guardado');
+      }catch(e){ console.warn('Firebase save error:', e); }
+    }, 250);
+  };
+
+  window._fbLoad = async function(){
+    try{
+      const snap = await _fbDOC.get();
+      if(!snap.exists) return null;
+      const raw = snap.data() || {};
+      const parsed = typeof raw.data === 'string' ? safeParse(raw.data) : raw.data;
+      if(parsed && raw.updatedAt && !parsed.__updatedAt) parsed.__updatedAt = raw.updatedAt;
+      return parsed || null;
+    }catch(e){
+      console.warn('Firebase load error:', e);
+      return null;
+    }
+  };
+
+  window.addEventListener('load', async ()=>{
+    const lastPage = localStorage.getItem('kaizen-last-page') || 'dashboard';
+    await new Promise(r=>setTimeout(r, 300));
+
+    const firebaseState = await window._fbLoad();
+    const localState = getBestLocalState();
+    const chosen = chooseState(firebaseState, localState);
+
+    if(chosen){
       window._fbLoaded = true;
-      window.state = d;
-      console.log("✓ Datos cargados desde Firebase");
-      if(window.go) window.go(lastPage);
-    } else {
-      console.log("Sin datos en Firebase aún");
+      window.state = chosen;
+      writeLocalEverywhere(chosen);
+      console.log('✓ Estado restaurado', chosen.__updatedAt ? 'con timestamp' : 'sin timestamp');
     }
 
-    hookFirebase();
-    setTimeout(hookFirebase, 1000);
+    window._fbAllowSave = true;
+    if(window.state) window._fbSave(window.state, {force:true});
+    if(window.go) setTimeout(()=>window.go(lastPage), 50);
   });
+})();
 </script>
 </head>
 <body>
@@ -2110,9 +2183,9 @@ boot();
     state.caseStudy.insights = state.caseStudy.insights || 'Documentar métricas desde mes 2 y mes 3 para justificar la subida a paquete de COP $2.000.000.';
     state.settings = state.settings || {autoResetWeekly:true,lastResetWeek:''};
 
-    let sp = state.clients.find(c => (c.name||'').toLowerCase().includes('super'));
+    let sp = state.clients.find(c => c.id===superpizza.id || (c.name||'').toLowerCase().includes('super'));
     if(!sp){ state.clients.unshift({...superpizza}); }
-    else { Object.assign(sp, {...superpizza, id:sp.id||superpizza.id, onboarding:sp.onboarding||superpizza.onboarding}); }
+    else { Object.assign(sp, {...superpizza, ...sp, id:sp.id||superpizza.id, onboarding:{...superpizza.onboarding, ...(sp.onboarding||{})}}); }
 
     if(!state.members.some(m=>m.id==='m_owner')) state.members.unshift({id:'m_owner',name:'Tú',role:'Dirección',pay:0,type:'Dueño',status:'Activo',avail:'Estrategia y gestión',cap:10,resp:'Ventas, estrategia, relación con clientes y control de calidad'});
     if(!state.members.some(m=>m.id==='m_presentadora')) state.members.push({id:'m_presentadora',name:'Presentadora principal',role:'Presentadora',pay:200000,type:'Por paquete',status:'Activo',avail:'Por definir',cap:4,resp:'Promo Confianza: COP $50.000 por sesión x 4 = COP $200.000'});
@@ -2411,7 +2484,7 @@ boot();
     window.state = saved || deepClone(DEFAULT_STATE);
 
     // Migración fuerte: paquetes oficiales y sin Esencial
-    state.packages = deepClone(OFFICIAL_PACKAGES);
+    state.packages = {...deepClone(OFFICIAL_PACKAGES), ...(state.packages||{})};
     delete state.packages.Esencial;
     delete state.packages.Escencial;
     delete state.packages.Essential;
@@ -2427,12 +2500,12 @@ boot();
     state.caseStudy = state.caseStudy || deepClone(DEFAULT_STATE.caseStudy);
     state.settings = state.settings || deepClone(DEFAULT_STATE.settings);
 
-    let sp = state.clients.find(c => (c.name||'').toLowerCase().includes('super'));
+    let sp = state.clients.find(c => c.id===SUPERPIZZA.id || (c.name||'').toLowerCase().includes('super'));
     if(!sp){ state.clients.unshift(deepClone(SUPERPIZZA)); }
     else {
       const keepId = sp.id || SUPERPIZZA.id;
-      const keepOnboarding = sp.onboarding || SUPERPIZZA.onboarding;
-      Object.assign(sp, deepClone(SUPERPIZZA), {id:keepId, onboarding:keepOnboarding});
+      const keepOnboarding = sp.onboarding || {};
+      Object.assign(sp, deepClone(SUPERPIZZA), sp, {id:keepId, onboarding:{...deepClone(SUPERPIZZA.onboarding), ...keepOnboarding}});
     }
 
     if(!state.members.some(m=>m.id==='m_owner')) state.members.unshift(deepClone(DEFAULT_STATE.members[0]));
@@ -2914,7 +2987,7 @@ boot();
     window.state=saved||clone(DEFAULT);
 
     // Migración limpia: solo paquetes oficiales.
-    state.packages=clone(PACKAGES);
+    state.packages={...clone(PACKAGES), ...(state.packages||{})};
     delete state.packages.Esencial; delete state.packages.Escencial; delete state.packages.Essential;
     state.catalog={...clone(CATALOG),...(state.catalog||{})};
     Object.keys(state.catalog).forEach(k=>{if(!state.packages[k])delete state.catalog[k]});
@@ -2929,11 +3002,11 @@ boot();
     state.goals=state.goals||clone(DEFAULT.goals); state.caseStudy=state.caseStudy||clone(DEFAULT.caseStudy);
     state.settings=state.settings||clone(DEFAULT.settings);
 
-    let sp=state.clients.find(c=>(c.name||'').toLowerCase().includes('super'));
+    let sp=state.clients.find(c=>c.id===SUPER.id || (c.name||'').toLowerCase().includes('super'));
     if(!sp) state.clients.unshift(clone(SUPER));
     else{
-      const logo=sp.logo||'', onboarding=sp.onboarding||SUPER.onboarding, id=sp.id||SUPER.id;
-      Object.assign(sp,clone(SUPER),{id,logo,onboarding});
+      const logo=sp.logo||'', onboarding=sp.onboarding||{}, id=sp.id||SUPER.id;
+      Object.assign(sp,clone(SUPER),sp,{id,logo,onboarding:{...clone(SUPER.onboarding),...onboarding}});
     }
     DEFAULT.members.forEach(m=>{if(!state.members.some(x=>x.id===m.id))state.members.push(clone(m))});
     DEFAULT.events.forEach(e=>{if(!state.events.some(x=>x.id===e.id))state.events.push(clone(e))});
@@ -3459,7 +3532,7 @@ boot();
 
   function normalizeStateV6(){
     window.state=window.state||{};
-    state.packages=JSON.parse(JSON.stringify(PACKAGES_V6));
+    state.packages={...JSON.parse(JSON.stringify(PACKAGES_V6)), ...(state.packages||{})};
     state.catalog={...JSON.parse(JSON.stringify(CATALOG_V6)),...(state.catalog||{})};
     Object.keys(state.catalog).forEach(k=>{if(!state.packages[k])delete state.catalog[k]});
     state.clients=Array.isArray(state.clients)?state.clients:[];
@@ -3471,18 +3544,18 @@ boot();
     state.checks=state.checks||{};
     state.goals=state.goals||{month:'Meta mensual',revenue:2000000,clients:1,reports:1,onTime:90,notes:'Cerrar caso de éxito Superpizza FA3 y preparar subida a Presencia.'};
     state.settings=state.settings||{};
-    let sp=state.clients.find(c=>(c.name||'').toLowerCase().includes('super'));
+    let sp=state.clients.find(c=>c.id==='c_superpizza_fa3' || (c.name||'').toLowerCase().includes('super'));
     if(sp){
-      sp.name='Superpizza FA3';
-      sp.pkg='Promo Confianza';
-      sp.status='Activo';
+      sp.name=sp.name||'Superpizza FA3';
+      sp.pkg=sp.pkg||'Promo Confianza';
+      sp.status=sp.status||'Activo';
       sp.payStatus=sp.payStatus||'50%';
       sp.payDate=sp.payDate||'2026-05-31';
       sp.currentMonth=sp.currentMonth||2;
       sp.promoEndsMonth=sp.promoEndsMonth||3;
       sp.normalPackage=sp.normalPackage||'Presencia';
       sp.notes=sp.notes||'Excepción por enganche: 3 meses a COP $950.000. Estamos cerrando mes 2; el 31 paga COP $475.000 para iniciar mes 3. En mes 3 paga 15 y 30: COP $475.000 cada uno. Desde julio / mes 4 pasa al paquete Presencia de COP $2.000.000.';
-      sp.onboarding=sp.onboarding||{contrato:true,anticipo:true,brief:false,accesos:false,grabacion:false,guiones:false,equipo:false,calendario:false,reporte:false};
+      sp.onboarding={contrato:true,anticipo:true,brief:false,accesos:false,grabacion:false,guiones:false,equipo:false,calendario:false,reporte:false, ...(sp.onboarding||{})};
     }
     const baseEvents=[
       {id:'e_sp_31',title:'Cobro Superpizza FA3 · inicia mes 3',date:'2026-05-31',type:'Cobro',client:'Superpizza FA3'},
@@ -3603,7 +3676,7 @@ boot();
     // Sin overlay. Asegura que el sistema respete rol V6 también en V5.
     sessionStorage.setItem(SESSION_V5,roleV6());
     removeOldLogin();
-    if(window.go) setTimeout(()=>window.go('dashboard'),50);
+    if(window.go) setTimeout(()=>window.go(localStorage.getItem('kaizen-last-page') || 'dashboard'),50);
   }
 
   // Sobrescribir render de paquetes para usar la lista exacta del catálogo visual.
@@ -4279,6 +4352,18 @@ boot();
   }, 600);
 
 })();
+</script>
+
+<script>
+/* Firebase sanity helper */
+window.kaizenSyncStatus = function(){
+  return {
+    firebaseReady: !!window._fbAllowSave,
+    lastPage: localStorage.getItem('kaizen-last-page') || 'dashboard',
+    clients: (window.state && window.state.clients || []).map(c=>c.name),
+    updatedAt: window.state && window.state.__updatedAt
+  };
+};
 </script>
 
 </body>
